@@ -1,5 +1,11 @@
 # Projeto de Avaliação de Algoritmos de Filtragem de Áudio em Plataformas de Comunicação
 
+<div style="width: 100%; text-align: center;">
+  <img src="https://github.com/user-attachments/assets/f87cf194-4724-4699-bac5-dc759c063e65"
+       alt="mp3-logo"
+       height="60">
+</div>
+
 Este repositório contém os materiais, áudios de teste utilizados no projeto de pesquisa para avaliação da eficácia dos algoritmos de filtragem de áudio utilizados por diferentes plataformas de comunicação por voz.
 
 ## Objetivo
