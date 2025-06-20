@@ -59,9 +59,9 @@ Cada áudio foi transmitido por meio das plataformas supracitadas, utilizando se
 
 ## ✍️ Autores
 
-* Edilson Piattão
+* Edilson Pereira dos Reis Souza Junior
 * Fábio Casagrande
-* João Bravo
+* João Vitor da Costa Vieira
 * Milton Tomomi Ozeki
 
 ## 🔧 Como Contribuir
