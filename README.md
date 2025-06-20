@@ -50,7 +50,7 @@ Cada áudio foi transmitido por meio das plataformas supracitadas, utilizando se
 
 ## 🔍 Métricas Avaliadas
 
-* Não sei
+* Análise visual dos espectrogramas
 
 ## 📄 Ferramentas Utilizadas
 
