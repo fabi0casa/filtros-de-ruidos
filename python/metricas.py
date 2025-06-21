@@ -24,9 +24,17 @@ def snr(signal, noise):
         return float('inf')
     return 10 * np.log10(power_signal / power_noise)
 
-def sdr(original, estimate):
-    noise = original - estimate
-    return snr(original, noise)
+def sdr(reference, estimate):
+    """
+    Cálculo simplificado de SDR: razão entre o sinal e o erro (distância entre base e estimado),
+    sem decomposição de fontes como mir_eval faria.
+    """
+    error = reference - estimate
+    power_est = np.sum(estimate ** 2)
+    power_error = np.sum(error ** 2)
+    if power_error == 0:
+        return float('inf')
+    return 10 * np.log10(power_est / power_error)
 
 def dbfs(rms):
     if rms == 0:
@@ -37,8 +45,8 @@ def dbfs(rms):
 with open(OUTPUT_CSV, 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow([
-        'Ruído', 'Plataforma', 
-        'SNR (dB)', 'SDR (dB)', 
+        'Ruído', 'Plataforma',
+        'SNR (dB)', 'SDR (dB)',
         'Nível Médio (Base) [dBFS]', 'Nível Médio (Filtrado) [dBFS]'
     ])
 
@@ -50,7 +58,10 @@ with open(OUTPUT_CSV, 'w', newline='') as csvfile:
             print(f"[AVISO] Áudio base não encontrado: {caminho_base}")
             continue
 
-        y_base, sr_base = librosa.load(caminho_base, sr=None)
+        y_base, sr_base = librosa.load(caminho_base, sr=None, mono=True)
+
+        # Normaliza explicitamente
+        y_base = y_base / np.max(np.abs(y_base)) if np.max(np.abs(y_base)) > 0 else y_base
 
         for plataforma in PLATAFORMAS:
             nome_filtrado = f"{plataforma.split()[0].upper()} - romulo + {ruido}.mp3"
@@ -60,7 +71,10 @@ with open(OUTPUT_CSV, 'w', newline='') as csvfile:
                 print(f"[AVISO] Áudio filtrado não encontrado: {caminho_filtrado}")
                 continue
 
-            y_filt, sr_filt = librosa.load(caminho_filtrado, sr=None)
+            y_filt, sr_filt = librosa.load(caminho_filtrado, sr=None, mono=True)
+
+            # Normaliza explicitamente
+            y_filt = y_filt / np.max(np.abs(y_filt)) if np.max(np.abs(y_filt)) > 0 else y_filt
 
             # Reamostragem se necessário
             if sr_base != sr_filt:
@@ -81,8 +95,8 @@ with open(OUTPUT_CSV, 'w', newline='') as csvfile:
             db_filt = dbfs(rms_filt)
 
             writer.writerow([
-                ruido, plataforma, 
-                round(valor_snr, 2), round(valor_sdr, 2), 
+                ruido, plataforma,
+                round(valor_snr, 2), round(valor_sdr, 2),
                 round(db_base, 2), round(db_filt, 2)
             ])
 
