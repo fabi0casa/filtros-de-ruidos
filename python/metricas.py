@@ -2,6 +2,11 @@ import os
 import numpy as np
 import librosa
 import csv
+from scipy.signal import correlate
+
+# Compatibilidade com numpy > 1.24
+if not hasattr(np, 'complex'):
+    np.complex = complex
 
 # Configuração de caminhos
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -12,41 +17,60 @@ OUTPUT_CSV = os.path.join(BASE_DIR, 'metricas_comparativas.csv')
 RUIDOS = ['bebe', 'cachorro', 'caminhao', 'multidao', 'obras']
 PLATAFORMAS = ['discord', 'krisp', 'teams', 'telegram', 'whatsapp', 'zoom']
 
-# Funções de métricas
-
+# Funções
 def calcular_rms(signal):
     return np.sqrt(np.mean(signal**2))
-
-def snr(signal, noise):
-    power_signal = np.mean(signal**2)
-    power_noise = np.mean(noise**2)
-    if power_noise == 0:
-        return float('inf')
-    return 10 * np.log10(power_signal / power_noise)
-
-def sdr(reference, estimate):
-    """
-    Cálculo simplificado de SDR: razão entre o sinal e o erro (distância entre base e estimado),
-    sem decomposição de fontes como mir_eval faria.
-    """
-    error = reference - estimate
-    power_est = np.sum(estimate ** 2)
-    power_error = np.sum(error ** 2)
-    if power_error == 0:
-        return float('inf')
-    return 10 * np.log10(power_est / power_error)
 
 def dbfs(rms):
     if rms == 0:
         return -float('inf')
     return 20 * np.log10(rms)
 
+def normalizar(signal, eps=1e-4):
+    max_abs = np.max(np.abs(signal))
+    return signal / (max_abs + eps)
+
+def alinhar_sinais(ref, est, max_lag=88200):
+    trecho = min(len(ref), len(est), 10 * max_lag)
+    ref_seg = ref[:trecho] - np.mean(ref[:trecho])
+    est_seg = est[:trecho] - np.mean(est[:trecho])
+    corr = correlate(ref_seg, est_seg, mode='full')
+    lags = np.arange(-len(est_seg) + 1, len(ref_seg))
+    lag = lags[np.argmax(corr)]
+
+    if lag > 0:
+        ref = ref[lag:]
+        est = est[:len(ref)]
+    elif lag < 0:
+        est = est[-lag:]
+        ref = ref[:len(est)]
+
+    min_len = min(len(ref), len(est))
+    return ref[:min_len], est[:min_len]
+
+def similaridade_espectral(ref, est, sr, n_fft=1024, hop_length=512):
+    S_ref = np.abs(librosa.stft(ref, n_fft=n_fft, hop_length=hop_length))
+    S_est = np.abs(librosa.stft(est, n_fft=n_fft, hop_length=hop_length))
+
+    # Ajuste de dimensões
+    min_frames = min(S_ref.shape[1], S_est.shape[1])
+    S_ref = S_ref[:, :min_frames]
+    S_est = S_est[:, :min_frames]
+
+    # Normalização e cálculo da correlação de Pearson média
+    ref_flat = S_ref.flatten()
+    est_flat = S_est.flatten()
+    if np.std(ref_flat) == 0 or np.std(est_flat) == 0:
+        return 0.0
+    corr = np.corrcoef(ref_flat, est_flat)[0, 1]
+    return corr
+
 # Cria e escreve o CSV
 with open(OUTPUT_CSV, 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow([
         'Ruído', 'Plataforma',
-        'SNR (dB)', 'SDR (dB)',
+        'Similaridade Espectral (%)',
         'Nível Médio (Base) [dBFS]', 'Nível Médio (Filtrado) [dBFS]'
     ])
 
@@ -59,9 +83,7 @@ with open(OUTPUT_CSV, 'w', newline='') as csvfile:
             continue
 
         y_base, sr_base = librosa.load(caminho_base, sr=None, mono=True)
-
-        # Normaliza explicitamente
-        y_base = y_base / np.max(np.abs(y_base)) if np.max(np.abs(y_base)) > 0 else y_base
+        y_base = normalizar(y_base)
 
         for plataforma in PLATAFORMAS:
             nome_filtrado = f"{plataforma.split()[0].upper()} - romulo + {ruido}.mp3"
@@ -72,31 +94,24 @@ with open(OUTPUT_CSV, 'w', newline='') as csvfile:
                 continue
 
             y_filt, sr_filt = librosa.load(caminho_filtrado, sr=None, mono=True)
+            y_filt = normalizar(y_filt)
 
-            # Normaliza explicitamente
-            y_filt = y_filt / np.max(np.abs(y_filt)) if np.max(np.abs(y_filt)) > 0 else y_filt
-
-            # Reamostragem se necessário
             if sr_base != sr_filt:
                 y_filt = librosa.resample(y_filt, orig_sr=sr_filt, target_sr=sr_base)
 
-            min_len = min(len(y_base), len(y_filt))
-            y_base_crop = y_base[:min_len]
-            y_filt_crop = y_filt[:min_len]
+            y_base_alinhado, y_filt_alinhado = alinhar_sinais(y_base, y_filt)
 
-            erro = y_base_crop - y_filt_crop
+            # Similaridade espectral
+            sim_esp = similaridade_espectral(y_base_alinhado, y_filt_alinhado, sr_base)
+            sim_esp_percent = max(0.0, round(sim_esp * 100, 2))  # em porcentagem
 
-            # Métricas
-            valor_snr = snr(y_base_crop, erro)
-            valor_sdr = sdr(y_base_crop, y_filt_crop)
-            rms_base = calcular_rms(y_base_crop)
-            rms_filt = calcular_rms(y_filt_crop)
-            db_base = dbfs(rms_base)
-            db_filt = dbfs(rms_filt)
+            # Níveis médios
+            db_base = dbfs(calcular_rms(y_base_alinhado))
+            db_filt = dbfs(calcular_rms(y_filt_alinhado))
 
             writer.writerow([
                 ruido, plataforma,
-                round(valor_snr, 2), round(valor_sdr, 2),
+                sim_esp_percent,
                 round(db_base, 2), round(db_filt, 2)
             ])
 
