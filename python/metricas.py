@@ -11,6 +11,7 @@ if not hasattr(np, 'complex'):
 # Configuração de caminhos
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILTRADOS_DIR = os.path.join(BASE_DIR, '..', 'filtrados')
+ORIGINAL_PATH = os.path.join(BASE_DIR, '..', 'Audios originais', 'romulo falando.mp3')
 OUTPUT_CSV = os.path.join(BASE_DIR, 'metricas_comparativas.csv')
 
 # Ruídos e plataformas
@@ -52,12 +53,10 @@ def similaridade_espectral(ref, est, sr, n_fft=1024, hop_length=512):
     S_ref = np.abs(librosa.stft(ref, n_fft=n_fft, hop_length=hop_length))
     S_est = np.abs(librosa.stft(est, n_fft=n_fft, hop_length=hop_length))
 
-    # Ajuste de dimensões
     min_frames = min(S_ref.shape[1], S_est.shape[1])
     S_ref = S_ref[:, :min_frames]
     S_est = S_est[:, :min_frames]
 
-    # Normalização e cálculo da correlação de Pearson média
     ref_flat = S_ref.flatten()
     est_flat = S_est.flatten()
     if np.std(ref_flat) == 0 or np.std(est_flat) == 0:
@@ -65,12 +64,19 @@ def similaridade_espectral(ref, est, sr, n_fft=1024, hop_length=512):
     corr = np.corrcoef(ref_flat, est_flat)[0, 1]
     return corr
 
+# Carrega o áudio original limpo
+if not os.path.exists(ORIGINAL_PATH):
+    raise FileNotFoundError(f"Áudio original limpo não encontrado em: {ORIGINAL_PATH}")
+
+y_original, sr_original = librosa.load(ORIGINAL_PATH, sr=None, mono=True)
+y_original = normalizar(y_original)
+
 # Cria e escreve o CSV
 with open(OUTPUT_CSV, 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow([
         'Ruído', 'Plataforma',
-        'Similaridade Espectral (%)',
+        'Similaridade Espectral com Original (%)',
         'Nível Médio (Base) [dBFS]', 'Nível Médio (Filtrado) [dBFS]'
     ])
 
@@ -96,18 +102,24 @@ with open(OUTPUT_CSV, 'w', newline='') as csvfile:
             y_filt, sr_filt = librosa.load(caminho_filtrado, sr=None, mono=True)
             y_filt = normalizar(y_filt)
 
-            if sr_base != sr_filt:
-                y_filt = librosa.resample(y_filt, orig_sr=sr_filt, target_sr=sr_base)
+            if sr_filt != sr_original:
+                y_filt = librosa.resample(y_filt, orig_sr=sr_filt, target_sr=sr_original)
 
-            y_base_alinhado, y_filt_alinhado = alinhar_sinais(y_base, y_filt)
+            # Alinhar o áudio filtrado com o original limpo
+            y_original_alinhado, y_filt_alinhado = alinhar_sinais(y_original, y_filt)
 
             # Similaridade espectral
-            sim_esp = similaridade_espectral(y_base_alinhado, y_filt_alinhado, sr_base)
-            sim_esp_percent = max(0.0, round(sim_esp * 100, 2))  # em porcentagem
+            sim_esp = similaridade_espectral(y_original_alinhado, y_filt_alinhado, sr_original)
+            sim_esp_percent = max(0.0, round(sim_esp * 100, 2))
 
-            # Níveis médios
+            # Níveis médios (com base no áudio com ruído)
+            if sr_base != sr_filt:
+                y_base = librosa.resample(y_base, orig_sr=sr_base, target_sr=sr_filt)
+                sr_base = sr_filt
+
+            y_base_alinhado, y_filt_alinhado_db = alinhar_sinais(y_base, y_filt)
             db_base = dbfs(calcular_rms(y_base_alinhado))
-            db_filt = dbfs(calcular_rms(y_filt_alinhado))
+            db_filt = dbfs(calcular_rms(y_filt_alinhado_db))
 
             writer.writerow([
                 ruido, plataforma,
